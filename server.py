@@ -25,12 +25,19 @@ app.add_middleware(
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-
 # -------------------------
 # 요청 모델
 # -------------------------
 class ChatRequest(BaseModel):
     message: str
+
+
+# -------------------------
+# Health Check (Warmup)
+# -------------------------
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
 
 # -------------------------
@@ -72,18 +79,16 @@ def select_repos_with_llm(query, repos):
 
 
 # -------------------------
-# API
+# Chat API
 # -------------------------
 @app.post("/chat")
 async def chat(req: ChatRequest):
     try:
         # 1. repo 가져오기
         repos = get_repos()
-        # print('repos', repos)
 
         # 2. LLM으로 repo 선택
         selected = select_repos_with_llm(req.message, repos)
-        # print('selected', selected)
 
         # 3. fallback
         if not selected:
@@ -92,7 +97,6 @@ async def chat(req: ChatRequest):
         # 4. context 생성
         context_texts = get_selected_context(selected)
         context = "\n\n".join(context_texts)
-        # print('context', context)
 
         # 5. 최종 LLM 답변
         response = client.chat.completions.create(
@@ -101,23 +105,24 @@ async def chat(req: ChatRequest):
                 {
                     "role": "system",
                     "content": """
-                    You are a GitHub assistant.
+                    You are a Eungchan's GitHub assistant.
 
                     Rules:
                     - Answer in the same language as the user
                     - Organize the answer clearly using bullet points
                     - Make it easy to read
-                    - Use the context as reference, but you can summarize freely
+                    - Use the context as reference, but summarize freely
                     """
-                        },
-                        {
-                            "role": "user",
-                            "content": f"""
+                                    },
+                                    {
+                                        "role": "user",
+                                        "content": f"""
                     Question:
                     {req.message}
 
                     Context:
                     {context}
+
                     Answer clearly using bullet points.
                     """
                 }

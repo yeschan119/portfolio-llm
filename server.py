@@ -8,8 +8,11 @@ import json
 
 from services.github import get_repos, get_selected_context
 
+# Render Start Command => uvicorn server:app --host 0.0.0.0 --port 10000
+# server.py안의 app 실행
+
 # -------------------------
-# 환경 설정
+# 환경 설정, export API_KEY=xxxx와 같은 역할
 # -------------------------
 load_dotenv()
 

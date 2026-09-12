@@ -18,7 +18,12 @@ load_dotenv()
 LOGGER = logging.getLogger(__name__)
 
 GITHUB_USERNAME = os.getenv("GITHUB_USERNAME", "yeschan119")
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN") or os.getenv("github_token")
+GITHUB_TOKEN = (
+    (os.getenv("GITHUB_TOKEN") or os.getenv("github_token") or "")
+    .strip()
+    .strip("\"'")
+    or None
+)
 GITHUB_API_URL = "https://api.github.com"
 GITHUB_GRAPHQL_URL = f"{GITHUB_API_URL}/graphql"
 GITHUB_CACHE_TTL_SECONDS = int(os.getenv("GITHUB_CACHE_TTL_SECONDS", "900"))
@@ -77,12 +82,16 @@ class GitHubDataError(RuntimeError):
     """Raised when required public GitHub data cannot be loaded."""
 
 
-def _headers(accept: str = "application/vnd.github+json") -> dict[str, str]:
+def _headers(
+    accept: str = "application/vnd.github+json",
+    *,
+    include_authorization: bool = True,
+) -> dict[str, str]:
     headers = {
         "Accept": accept,
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    if GITHUB_TOKEN:
+    if include_authorization and GITHUB_TOKEN:
         headers["Authorization"] = f"Bearer {GITHUB_TOKEN}"
     return headers
 
@@ -103,9 +112,38 @@ def clear_cache() -> None:
     _CACHE.clear()
 
 
+def _get_public_response(
+    url: str,
+    *,
+    accept: str = "application/vnd.github+json",
+    params: dict[str, Any] | None = None,
+    timeout: int = 10,
+) -> requests.Response:
+    response = requests.get(
+        url,
+        headers=_headers(accept),
+        params=params,
+        timeout=timeout,
+    )
+
+    if GITHUB_TOKEN and response.status_code in {401, 403}:
+        LOGGER.warning(
+            "Authenticated GitHub REST request returned %s; retrying public request without a token",
+            response.status_code,
+        )
+        response = requests.get(
+            url,
+            headers=_headers(accept, include_authorization=False),
+            params=params,
+            timeout=timeout,
+        )
+
+    return response
+
+
 def _get_json(url: str, *, params: dict[str, Any] | None = None) -> Any:
     try:
-        response = requests.get(url, headers=_headers(), params=params, timeout=10)
+        response = _get_public_response(url, params=params)
         response.raise_for_status()
         return response.json()
     except (requests.RequestException, ValueError) as exc:
@@ -343,9 +381,9 @@ def get_readme(repo_name: str) -> str:
     def load() -> str:
         url = f"{GITHUB_API_URL}/repos/{GITHUB_USERNAME}/{repo_name}/readme"
         try:
-            response = requests.get(
+            response = _get_public_response(
                 url,
-                headers=_headers("application/vnd.github.raw+json"),
+                accept="application/vnd.github.raw+json",
                 timeout=10,
             )
             if response.status_code == 404:
